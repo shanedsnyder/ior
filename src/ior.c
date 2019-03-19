@@ -1341,6 +1341,7 @@ static void TestIoSys(IOR_test_t *test)
                         timer[5] = GetTimeStamp();
                         MPI_CHECK(MPI_Barrier(testComm), "barrier error");
 
+#if 0
                         /* get the size of the file just written */
                         results[rep].write.aggFileSizeFromStat =
                                 backend->get_file_size(params, testComm, testFileName);
@@ -1348,6 +1349,7 @@ static void TestIoSys(IOR_test_t *test)
                         /* check if stat() of file doesn't equal expected file size,
                            use actual amount of byte moved */
                         CheckFileSize(test, dataMoved, rep, WRITE);
+#endif
 
                         if (verbose >= VERBOSE_3)
                                 WriteTimes(params, timer, rep, WRITE);
