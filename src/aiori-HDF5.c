@@ -23,6 +23,7 @@
  * save users the trouble of  passing this flag through configure */
 #define H5_USE_16_API
 #include <hdf5.h>
+#include <H5VLrados_public.h>
 #include <mpi.h>
 
 #include "aiori.h"              /* abstract IOR interface */
@@ -30,6 +31,26 @@
 #include "iordef.h"
 
 #define NUM_DIMS 1              /* number of dimensions to data set */
+
+/************************** O P T I O N S *****************************/
+struct rados_options{
+  char * user;
+  char * conf;
+  char * pool;
+};
+
+static struct rados_options o = {
+  .user = NULL,
+  .conf = NULL,
+  .pool = NULL,
+};
+
+static option_help options [] = {
+      {0, "rados.user", "Username for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.user},
+      {0, "rados.conf", "Config file for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.conf},
+      {0, "rados.pool", "RADOS pool to use for I/O", OPTION_REQUIRED_ARGUMENT, 's', & o.pool},
+      LAST_OPTION
+};
 
 /******************************************************************************/
 /*
@@ -79,6 +100,12 @@
     }                                                                    \
 } while(0)
 #endif                          /* H5_VERS_MAJOR > 1 && H5_VERS_MINOR > 6 */
+
+#define RADOS_ERR(__err_str, __ret) do { \
+        errno = -__ret; \
+        ERR(__err_str); \
+} while(0)
+
 /**************************** P R O T O T Y P E S *****************************/
 
 static IOR_offset_t SeekOffset(void *, IOR_offset_t, IOR_param_t *);
@@ -93,6 +120,7 @@ static char* HDF5_GetVersion();
 static void HDF5_Fsync(void *, IOR_param_t *);
 static IOR_offset_t HDF5_GetFileSize(IOR_param_t *, MPI_Comm, char *);
 static int HDF5_Access(const char *, int, IOR_param_t *);
+static option_help * RADOS_options();
 
 /************************** D E C L A R A T I O N S ***************************/
 
@@ -112,6 +140,7 @@ ior_aiori_t hdf5_aiori = {
         .rmdir = aiori_posix_rmdir,
         .access = HDF5_Access,
         .stat = aiori_posix_stat,
+        .get_options = RADOS_options,
 };
 
 static hid_t xferPropList;      /* xfer property list */
@@ -122,6 +151,9 @@ hid_t memDataSpace;             /* memory data space id */
 int newlyOpenedFile;            /* newly opened file */
 
 /***************************** F U N C T I O N S ******************************/
+static option_help * RADOS_options(){
+  return options;
+}
 
 /*
  * Create and open a file through the HDF5 interface.
@@ -221,13 +253,29 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
                 ShowHints(&mpiHints);
                 fprintf(stdout, "}\n");
         }
-        HDF5_CHECK(H5Pset_fapl_mpio(accessPropList, comm, mpiHints),
-                   "cannot set file access property list");
+        if (o.conf) {
+          int ret;
 
-        /* set alignment */
-        HDF5_CHECK(H5Pset_alignment(accessPropList, param->setAlignment,
-                                    param->setAlignment),
-                   "cannot set alignment");
+          fprintf(stdout, "\nUsing RADOS VOL with user=%s, pool=%s, config=%s\n", o.user, o.pool, o.conf);
+          ret = rados_create(&param->rados_cluster, o.user);
+          if (ret)
+                  RADOS_ERR("unable to create RADOS cluster handle", ret);
+          ret = rados_conf_read_file(param->rados_cluster, o.conf);
+          if (ret)
+                  RADOS_ERR("unable to read RADOS config file", ret);
+          HDF5_CHECK(H5VLrados_init(param->rados_cluster, o.pool),
+                     "cannot initialize RADOS VOL");
+          HDF5_CHECK(H5Pset_fapl_rados(accessPropList, comm, mpiHints),
+                     "cannot set file access property list");
+        } else {
+          HDF5_CHECK(H5Pset_fapl_mpio(accessPropList, comm, mpiHints),
+                     "cannot set file access property list");
+
+          /* set alignment */
+          HDF5_CHECK(H5Pset_alignment(accessPropList, param->setAlignment,
+                                      param->setAlignment),
+                     "cannot set alignment");
+        }
 
 #ifdef HAVE_H5PSET_ALL_COLL_METADATA_OPS
         if (param->collective_md) {
