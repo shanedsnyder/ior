@@ -67,7 +67,7 @@ endif
 
 if USE_RADOS_AIORI
 extraSOURCES += aiori-RADOS.c
-extraLDADD += -lrados
+#extraLDADD += -lrados
 endif
 
 if USE_S3_AIORI
