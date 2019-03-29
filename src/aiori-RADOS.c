@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <rados/librados.h>
+#include <librados-mobject-store.h>
 
 #include "ior.h"
 #include "iordef.h"
