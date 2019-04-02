@@ -119,8 +119,12 @@ static void HDF5_Delete(char *, IOR_param_t *);
 static char* HDF5_GetVersion();
 static void HDF5_Fsync(void *, IOR_param_t *);
 static IOR_offset_t HDF5_GetFileSize(IOR_param_t *, MPI_Comm, char *);
+static int HDF5_StatFS(const char *, ior_aiori_statfs_t *, IOR_param_t *);
+static int HDF5_MkDir(const char *, mode_t, IOR_param_t *);
+static int HDF5_RmDir(const char *, IOR_param_t *);
 static int HDF5_Access(const char *, int, IOR_param_t *);
-static option_help * RADOS_options();
+static int HDF5_Stat(const char *, struct stat *, IOR_param_t *);
+static option_help * HDF5_options();
 
 /************************** D E C L A R A T I O N S ***************************/
 
@@ -135,12 +139,12 @@ ior_aiori_t hdf5_aiori = {
         .get_version = HDF5_GetVersion,
         .fsync = HDF5_Fsync,
         .get_file_size = HDF5_GetFileSize,
-        .statfs = aiori_posix_statfs,
-        .mkdir = aiori_posix_mkdir,
-        .rmdir = aiori_posix_rmdir,
+        .statfs = HDF5_StatFS,
+        .mkdir = HDF5_MkDir,
+        .rmdir = HDF5_RmDir,
         .access = HDF5_Access,
-        .stat = aiori_posix_stat,
-        .get_options = RADOS_options,
+        .stat = HDF5_Stat,
+        .get_options = HDF5_options,
 };
 
 static hid_t xferPropList;      /* xfer property list */
@@ -151,7 +155,7 @@ hid_t memDataSpace;             /* memory data space id */
 int newlyOpenedFile;            /* newly opened file */
 
 /***************************** F U N C T I O N S ******************************/
-static option_help * RADOS_options(){
+static option_help * HDF5_options(){
   return options;
 }
 
@@ -256,7 +260,7 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
         if (o.conf) {
           int ret;
 
-          fprintf(stdout, "\nUsing RADOS VOL with user=%s, pool=%s, config=%s\n", o.user, o.pool, o.conf);
+          //fprintf(stdout, "\nUsing RADOS VOL with user=%s, pool=%s, config=%s\n", o.user, o.pool, o.conf);
           ret = rados_create(&param->rados_cluster, o.user);
           if (ret)
                   RADOS_ERR("unable to create RADOS cluster handle", ret);
@@ -515,8 +519,9 @@ static void HDF5_Close(void *fd, IOR_param_t * param)
 static void HDF5_Delete(char *testFileName, IOR_param_t * param)
 {
   if(param->dryRun)
-    return
-  MPIIO_Delete(testFileName, param);
+    return;
+//  MPIIO_Delete(testFileName, param);
+  WARN("delete not supported in HDF5 backend!");
   return;
 }
 
@@ -651,7 +656,27 @@ HDF5_GetFileSize(IOR_param_t * test, MPI_Comm testComm, char *testFileName)
 {
   if(test->dryRun)
     return 0;
-  return(MPIIO_GetFileSize(test, testComm, testFileName));
+//  return(MPIIO_GetFileSize(test, testComm, testFileName));
+return -1;
+}
+
+static int HDF5_StatFS(const char *oid, ior_aiori_statfs_t *stat_buf,
+                        IOR_param_t *param)
+{
+        WARN("statfs not supported in HDF5 backend!");
+        return -1;
+}
+
+static int HDF5_MkDir(const char *oid, mode_t mode, IOR_param_t *param)
+{
+        WARN("mkdir not supported in HDF5 backend!");
+        return -1;
+}
+
+static int HDF5_RmDir(const char *oid, IOR_param_t *param)
+{
+        WARN("rmdir not supported in HDF5 backend!");
+        return -1;
 }
 
 /*
@@ -661,5 +686,13 @@ static int HDF5_Access(const char *path, int mode, IOR_param_t *param)
 {
   if(param->dryRun)
     return 0;
-  return(MPIIO_Access(path, mode, param));
+//  return(MPIIO_Access(path, mode, param));
+  WARN("access not supported in HDF5 backend!");
+  return -1;
+}
+
+static int HDF5_Stat(const char *oid, struct stat *buf, IOR_param_t *param)
+{
+        WARN("stat not supported in HDF5 backend!");
+        return -1;
 }
