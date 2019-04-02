@@ -49,6 +49,8 @@ static option_help options [] = {
 
 
 /**************************** P R O T O T Y P E S *****************************/
+static void RADOS_Initialize(void);
+static void RADOS_Finalize(void);
 static void *RADOS_Create(char *, IOR_param_t *);
 static void *RADOS_Open(char *, IOR_param_t *);
 static IOR_offset_t RADOS_Xfer(int, void *, IOR_size_t *,
@@ -81,6 +83,8 @@ ior_aiori_t rados_aiori = {
         .rmdir = RADOS_RmDir,
         .access = RADOS_Access,
         .stat = RADOS_Stat,
+        .initialize = RADOS_Initialize,
+        .finalize = RADOS_Finalize,
         .get_options = RADOS_options,
 };
 
@@ -89,53 +93,56 @@ ior_aiori_t rados_aiori = {
         ERR(__err_str); \
 } while(0)
 
+/******************************* G L O B A L S ********************************/
+
+static rados_t rados_cluster;           /* RADOS cluster handle */
+static rados_ioctx_t rados_ioctx;       /* I/O context for our pool in the RADOS cluster */
+
 /***************************** F U N C T I O N S ******************************/
 static option_help * RADOS_options(){
   return options;
 }
 
-static void RADOS_Cluster_Init(IOR_param_t * param)
+static void RADOS_Initialize()
 {
         int ret;
 
         /* create RADOS cluster handle */
-        ret = rados_create(&param->rados_cluster, o.user);
+        ret = rados_create(&rados_cluster, o.user);
         if (ret)
                 RADOS_ERR("unable to create RADOS cluster handle", ret);
 
         /* set the handle using the Ceph config */
-        ret = rados_conf_read_file(param->rados_cluster, o.conf);
+        ret = rados_conf_read_file(rados_cluster, o.conf);
         if (ret)
                 RADOS_ERR("unable to read RADOS config file", ret);
 
         /* connect to the RADOS cluster */
-        ret = rados_connect(param->rados_cluster);
+        ret = rados_connect(rados_cluster);
         if (ret)
                 RADOS_ERR("unable to connect to the RADOS cluster", ret);
 
         /* create an io context for the pool we are operating on */
-        ret = rados_ioctx_create(param->rados_cluster, o.pool, &param->rados_ioctx);
+        ret = rados_ioctx_create(rados_cluster, o.pool, &rados_ioctx);
         if (ret)
                 RADOS_ERR("unable to create an I/O context for the RADOS cluster", ret);
 
         return;
 }
 
-static void RADOS_Cluster_Finalize(IOR_param_t * param)
+static void RADOS_Finalize()
 {
         /* ioctx destroy */
-        rados_ioctx_destroy(param->rados_ioctx);
+        rados_ioctx_destroy(rados_ioctx);
 
         /* shutdown */
-        rados_shutdown(param->rados_cluster);
+        rados_shutdown(rados_cluster);
 }
 
 static void *RADOS_Create_Or_Open(char *testFileName, IOR_param_t * param, int create_flag)
 {
         int ret;
         char *oid;
-
-        RADOS_Cluster_Init(param);
 
         if (param->useO_DIRECT == TRUE)
                 WARN("direct I/O mode is not implemented in RADOS\n");
@@ -157,7 +164,7 @@ static void *RADOS_Create_Or_Open(char *testFileName, IOR_param_t * param, int c
                 /* create a RADOS "write op" for creating the object */
                 create_op = rados_create_write_op();
                 rados_write_op_create(create_op, rados_create_flag, NULL);
-                ret = rados_write_op_operate(create_op, param->rados_ioctx, oid,
+                ret = rados_write_op_operate(create_op, rados_ioctx, oid,
                                        NULL, 0);
                 rados_release_write_op(create_op);
                 if (ret)
@@ -197,7 +204,7 @@ static IOR_offset_t RADOS_Xfer(int access, void *fd, IOR_size_t * buffer,
                 write_op = rados_create_write_op();
                 rados_write_op_write(write_op, (const char *)buffer,
                                      length, param->offset);
-                ret = rados_write_op_operate(write_op, param->rados_ioctx,
+                ret = rados_write_op_operate(write_op, rados_ioctx,
                                              oid, NULL, 0);
                 rados_release_write_op(write_op);
                 if (ret)
@@ -212,7 +219,7 @@ static IOR_offset_t RADOS_Xfer(int access, void *fd, IOR_size_t * buffer,
                 read_op = rados_create_read_op();
                 rados_read_op_read(read_op, param->offset, length, (char *)buffer,
                                    &bytes_read, &read_ret);
-                ret = rados_read_op_operate(read_op, param->rados_ioctx, oid, 0);
+                ret = rados_read_op_operate(read_op, rados_ioctx, oid, 0);
                 rados_release_read_op(read_op);
                 if (ret || read_ret || ((IOR_offset_t)bytes_read != length))
                         RADOS_ERR("unable to read RADOS object", ret);
@@ -230,8 +237,7 @@ static void RADOS_Close(void *fd, IOR_param_t * param)
 {
         char *oid = (char *)fd;
 
-        /* object does not need to be "closed", but we should tear the cluster down */
-        RADOS_Cluster_Finalize(param);
+        /* object does not need to be "closed" */
         free(oid);
 
         return;
@@ -243,19 +249,14 @@ static void RADOS_Delete(char *testFileName, IOR_param_t * param)
         char *oid = testFileName;
         rados_write_op_t remove_op;
 
-        /* we have to reestablish cluster connection here... */
-        RADOS_Cluster_Init(param);
-
         /* remove the object */
         remove_op = rados_create_write_op();
         rados_write_op_remove(remove_op);
-        ret = rados_write_op_operate(remove_op, param->rados_ioctx,
+        ret = rados_write_op_operate(remove_op, rados_ioctx,
                                      oid, NULL, 0);
         rados_release_write_op(remove_op);
         if (ret)
                 RADOS_ERR("unable to remove RADOS object", ret);
-
-        RADOS_Cluster_Finalize(param);
 
         return;
 }
@@ -270,13 +271,10 @@ static IOR_offset_t RADOS_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
         int stat_ret;
         IOR_offset_t aggSizeFromStat, tmpMin, tmpMax, tmpSum;
 
-        /* we have to reestablish cluster connection here... */
-        RADOS_Cluster_Init(test);
-
         /* stat the object */
         stat_op = rados_create_read_op();
         rados_read_op_stat(stat_op, &oid_size, NULL, &stat_ret);
-        ret = rados_read_op_operate(stat_op, test->rados_ioctx, oid, 0);
+        ret = rados_read_op_operate(stat_op, rados_ioctx, oid, 0);
         rados_release_read_op(stat_op);
         if (ret || stat_ret)
                 RADOS_ERR("unable to stat RADOS object", stat_ret);
@@ -307,8 +305,6 @@ static IOR_offset_t RADOS_GetFileSize(IOR_param_t * test, MPI_Comm testComm,
                 }
         }
 
-        RADOS_Cluster_Finalize(test);
-
         return aggSizeFromStat;
 }
 
@@ -338,16 +334,11 @@ static int RADOS_Access(const char *oid, int mode, IOR_param_t *param)
         int prval;
         uint64_t oid_size;
 
-        /* we have to reestablish cluster connection here... */
-        RADOS_Cluster_Init(param);
-
         /* use read_op stat to check for oid existence */
         read_op = rados_create_read_op();
         rados_read_op_stat(read_op, &oid_size, NULL, &prval);
-        ret = rados_read_op_operate(read_op, param->rados_ioctx, oid, 0);
+        ret = rados_read_op_operate(read_op, rados_ioctx, oid, 0);
         rados_release_read_op(read_op);
-
-        RADOS_Cluster_Finalize(param);
 
         if (ret | prval)
                 return -1;

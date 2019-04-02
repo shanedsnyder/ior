@@ -182,10 +182,6 @@ typedef struct
     int         collective_md;       /* use collective metatata optimization */
  
 
-    /* RADOS variables */
-    rados_t rados_cluster;           /* RADOS cluster handle */
-    rados_ioctx_t rados_ioctx;       /* I/O context for our pool in the RADOS cluster */
-
     /* NCMPI variables */
     int var_id;                      /* variable id handle for data set */
 
