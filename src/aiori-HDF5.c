@@ -684,11 +684,50 @@ static int HDF5_RmDir(const char *oid, IOR_param_t *param)
  */
 static int HDF5_Access(const char *path, int mode, IOR_param_t *param)
 {
-  if(param->dryRun)
-    return 0;
-//  return(MPIIO_Access(path, mode, param));
-  WARN("access not supported in HDF5 backend!");
-  return -1;
+        htri_t accessible = -1;
+        hid_t accessPropList;
+        MPI_Comm comm;
+        MPI_Info mpiHints = MPI_INFO_NULL;
+
+        if(param->dryRun)
+                return 0;
+        //  return(MPIIO_Access(path, mode, param));
+
+        /* set up file access property list */
+        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
+        HDF5_CHECK(accessPropList, "cannot create file access property list");
+
+       /* store MPI communicator info for the file access property list */
+        if (param->filePerProc) {
+                comm = MPI_COMM_SELF;
+        } else {
+                comm = testComm;
+        }
+
+        if (o.conf) {
+                int ret;
+
+                //fprintf(stdout, "\nUsing RADOS VOL with user=%s, pool=%s, config=%s\n", o.user, o.pool, o.conf);
+                ret = rados_create(&param->rados_cluster, o.user);
+                if (ret)
+                        RADOS_ERR("unable to create RADOS cluster handle", ret);
+                ret = rados_conf_read_file(param->rados_cluster, o.conf);
+                if (ret)
+                        RADOS_ERR("unable to read RADOS config file", ret);
+                HDF5_CHECK(H5VLrados_init(param->rados_cluster, o.pool),
+                                "cannot initialize RADOS VOL");
+                HDF5_CHECK(H5Pset_fapl_rados(accessPropList, comm, mpiHints),
+                                "cannot set file access property list");
+        }
+
+        //WARN("access not supported in HDF5 backend!");
+        accessible = H5Fis_accessible(path, accessPropList);
+
+        HDF5_CHECK(H5Pclose(accessPropList),
+                   "cannot close access property list");
+
+        return accessible;
+;
 }
 
 static int HDF5_Stat(const char *oid, struct stat *buf, IOR_param_t *param)
