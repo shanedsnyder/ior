@@ -33,22 +33,22 @@
 #define NUM_DIMS 1              /* number of dimensions to data set */
 
 /************************** O P T I O N S *****************************/
-struct rados_options{
+struct hdf5_options{
   char * user;
   char * conf;
   char * pool;
 };
 
-static struct rados_options o = {
+static struct hdf5_options o = {
   .user = NULL,
   .conf = NULL,
   .pool = NULL,
 };
 
 static option_help options [] = {
-      {0, "rados.user", "Username for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.user},
-      {0, "rados.conf", "Config file for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.conf},
-      {0, "rados.pool", "RADOS pool to use for I/O", OPTION_REQUIRED_ARGUMENT, 's', & o.pool},
+      {0, "hdf5.user", "Username for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.user},
+      {0, "hdf5.conf", "Config file for the RADOS cluster", OPTION_REQUIRED_ARGUMENT, 's', & o.conf},
+      {0, "hdf5.pool", "RADOS pool to use for I/O", OPTION_REQUIRED_ARGUMENT, 's', & o.pool},
       LAST_OPTION
 };
 
