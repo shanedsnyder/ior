@@ -31,6 +31,20 @@
 
 #define NUM_DIMS 1              /* number of dimensions to data set */
 
+/************************** O P T I O N S *****************************/
+struct hdf5_options{
+  int chunkSize;
+};
+
+static struct hdf5_options o = {
+  .chunkSize = 0,
+};
+
+static option_help options [] = {
+      {0, "hdf5.chunk_size", "Chunk size to use for I/O", OPTION_OPTIONAL_ARGUMENT, 'd', & o.chunkSize},
+      LAST_OPTION
+};
+
 /******************************************************************************/
 /*
  * HDF5_CHECK will display a custom error message and then exit the program
@@ -79,6 +93,7 @@
     }                                                                    \
 } while(0)
 #endif                          /* H5_VERS_MAJOR > 1 && H5_VERS_MINOR > 6 */
+
 /**************************** P R O T O T Y P E S *****************************/
 
 static IOR_offset_t SeekOffset(void *, IOR_offset_t, IOR_param_t *);
@@ -92,7 +107,12 @@ static void HDF5_Delete(char *, IOR_param_t *);
 static char* HDF5_GetVersion();
 static void HDF5_Fsync(void *, IOR_param_t *);
 static IOR_offset_t HDF5_GetFileSize(IOR_param_t *, MPI_Comm, char *);
+static int HDF5_StatFS(const char *, ior_aiori_statfs_t *, IOR_param_t *);
+static int HDF5_MkDir(const char *, mode_t, IOR_param_t *);
+static int HDF5_RmDir(const char *, IOR_param_t *);
 static int HDF5_Access(const char *, int, IOR_param_t *);
+static int HDF5_Stat(const char *, struct stat *, IOR_param_t *);
+static option_help * HDF5_options();
 
 /************************** O P T I O N S *****************************/
 typedef struct{
@@ -135,12 +155,12 @@ ior_aiori_t hdf5_aiori = {
         .get_version = HDF5_GetVersion,
         .fsync = HDF5_Fsync,
         .get_file_size = HDF5_GetFileSize,
-        .statfs = aiori_posix_statfs,
-        .mkdir = aiori_posix_mkdir,
-        .rmdir = aiori_posix_rmdir,
+        .statfs = HDF5_StatFS,
+        .mkdir = HDF5_MkDir,
+        .rmdir = HDF5_RmDir,
         .access = HDF5_Access,
-        .stat = aiori_posix_stat,
-        .get_options = HDF5_options
+        .stat = HDF5_Stat,
+        .get_options = HDF5_options,
 };
 
 static hid_t xferPropList;      /* xfer property list */
@@ -151,6 +171,9 @@ hid_t memDataSpace;             /* memory data space id */
 int newlyOpenedFile;            /* newly opened file */
 
 /***************************** F U N C T I O N S ******************************/
+static option_help * HDF5_options(){
+  return options;
+}
 
 /*
  * Create and open a file through the HDF5 interface.
@@ -250,6 +273,7 @@ static void *HDF5_Open(char *testFileName, IOR_param_t * param)
                 ShowHints(&mpiHints);
                 fprintf(stdout, "}\n");
         }
+
         HDF5_CHECK(H5Pset_fapl_mpio(accessPropList, comm, mpiHints),
                    "cannot set file access property list");
 
@@ -497,8 +521,9 @@ static void HDF5_Close(void *fd, IOR_param_t * param)
 static void HDF5_Delete(char *testFileName, IOR_param_t * param)
 {
   if(param->dryRun)
-    return
-  MPIIO_Delete(testFileName, param);
+    return;
+//  MPIIO_Delete(testFileName, param);
+  WARN("delete not supported in HDF5 backend!");
   return;
 }
 
@@ -592,8 +617,17 @@ static void SetupDataSet(void *fd, IOR_param_t * param)
                 dataSetSuffix++);
 
         if (param->open == WRITE) {     /* WRITE */
+                hsize_t chunk_dims[NUM_DIMS];
+
                 /* create data set */
                 dataSetPropList = H5Pcreate(H5P_DATASET_CREATE);
+                /* Set chunk size */
+                if (o.chunkSize > 0) {
+                    chunk_dims[0] = o.chunkSize;
+                    HDF5_CHECK(H5Pset_chunk(dataSetPropList, NUM_DIMS, chunk_dims),
+                        "cannot set chunk size");
+                }
+
                 /* check if hdf5 available */
 #if defined (H5_VERS_MAJOR) && defined (H5_VERS_MINOR)
                 /* no-fill option not available until hdf5-1.6.x */
@@ -633,7 +667,27 @@ HDF5_GetFileSize(IOR_param_t * test, MPI_Comm testComm, char *testFileName)
 {
   if(test->dryRun)
     return 0;
-  return(MPIIO_GetFileSize(test, testComm, testFileName));
+//  return(MPIIO_GetFileSize(test, testComm, testFileName));
+return -1;
+}
+
+static int HDF5_StatFS(const char *oid, ior_aiori_statfs_t *stat_buf,
+                        IOR_param_t *param)
+{
+        WARN("statfs not supported in HDF5 backend!");
+        return -1;
+}
+
+static int HDF5_MkDir(const char *oid, mode_t mode, IOR_param_t *param)
+{
+        WARN("mkdir not supported in HDF5 backend!");
+        return -1;
+}
+
+static int HDF5_RmDir(const char *oid, IOR_param_t *param)
+{
+        WARN("rmdir not supported in HDF5 backend!");
+        return -1;
 }
 
 /*
@@ -641,7 +695,34 @@ HDF5_GetFileSize(IOR_param_t * test, MPI_Comm testComm, char *testFileName)
  */
 static int HDF5_Access(const char *path, int mode, IOR_param_t *param)
 {
-  if(param->dryRun)
-    return 0;
-  return(MPIIO_Access(path, mode, param));
+        htri_t accessible = -1;
+        hid_t accessPropList;
+        MPI_Comm comm;
+        MPI_Info mpiHints = MPI_INFO_NULL;
+
+        if(param->dryRun)
+                return 0;
+
+        /* set up file access property list */
+        accessPropList = H5Pcreate(H5P_FILE_ACCESS);
+        HDF5_CHECK(accessPropList, "cannot create file access property list");
+
+       /* store MPI communicator info for the file access property list */
+        if (param->filePerProc) {
+                comm = MPI_COMM_SELF;
+        } else {
+                comm = testComm;
+        }
+
+        accessible = H5Fis_accessible(path, accessPropList);
+        HDF5_CHECK(H5Pclose(accessPropList),
+                   "cannot close access property list");
+        return accessible;
+;
+}
+
+static int HDF5_Stat(const char *oid, struct stat *buf, IOR_param_t *param)
+{
+        WARN("stat not supported in HDF5 backend!");
+        return -1;
 }
