@@ -144,9 +144,6 @@ static void *RADOS_Create_Or_Open(char *testFileName, IOR_param_t * param, int c
         int ret;
         char *oid;
 
-        if (param->useO_DIRECT == TRUE)
-                WARN("direct I/O mode is not implemented in RADOS\n");
-
         oid = strdup(testFileName);
         if (!oid)
                 ERR("unable to allocate RADOS oid");
